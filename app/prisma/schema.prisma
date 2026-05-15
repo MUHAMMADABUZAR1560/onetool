@@ -1,0 +1,319 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Core User System
+model User {
+  id               String           @id @default(cuid())
+  email            String           @unique
+  name             String?
+  avatar           String?
+  clerkId          String?          @unique
+  stripeCustomerId String?          @unique
+  role             UserRole         @default(USER)
+  plan             Plan             @default(FREE)
+  creditsRemaining Int              @default(50)
+  creditsUsedToday Int              @default(0)
+  subscriptions    Subscription[]
+  toolUsages       ToolUsage[]
+  files            File[]
+  workspaces       WorkspaceMember[]
+  apiKeys          ApiKey[]
+  notifications    Notification[]
+  automations      Automation[]
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@index([email])
+  @@index([clerkId])
+}
+
+enum UserRole {
+  USER
+  ADMIN
+  MODERATOR
+  ENTERPRISE
+}
+
+enum Plan {
+  FREE
+  PRO
+  BUSINESS
+  ENTERPRISE
+}
+
+// Workspace & Teams
+model Workspace {
+  id        String            @id @default(cuid())
+  name      String
+  slug      String            @unique
+  logo      String?
+  plan      Plan              @default(FREE)
+  members   WorkspaceMember[]
+  files     File[]
+  tools     ToolUsage[]
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+}
+
+model WorkspaceMember {
+  id          String        @id @default(cuid())
+  role        WorkspaceRole @default(MEMBER)
+  userId      String
+  user        User          @relation(fields: [userId], references: [id])
+  workspaceId String
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id])
+
+  @@unique([userId, workspaceId])
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+// Tool System
+model Tool {
+  id          String       @id @default(cuid())
+  name        String
+  slug        String       @unique
+  description String
+  category    ToolCategory
+  icon        String?
+  color       String?
+  isAI        Boolean      @default(false)
+  isPremium   Boolean      @default(false)
+  isActive    Boolean      @default(true)
+  sortOrder   Int          @default(0)
+  usages      ToolUsage[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([category])
+  @@index([slug])
+}
+
+enum ToolCategory {
+  PDF
+  IMAGE
+  VIDEO
+  AUDIO
+  AI
+  BUSINESS
+  STUDENT
+  MARKETING
+  CREATOR
+  DESIGNER
+  DEVELOPER
+  HEALTH
+  HR
+  LEGAL
+  TRAVEL
+}
+
+model ToolUsage {
+  id           String    @id @default(cuid())
+  status       JobStatus @default(PENDING)
+  inputFiles   Json?
+  outputFiles  Json?
+  params       Json?
+  result       Json?
+  creditsUsed  Int       @default(1)
+  processingMs Int?
+  errorMessage String?
+  toolId       String
+  tool         Tool      @relation(fields: [toolId], references: [id])
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+  workspaceId  String?
+  workspace    Workspace? @relation(fields: [workspaceId], references: [id])
+  createdAt    DateTime  @default(now())
+  completedAt  DateTime?
+
+  @@index([userId, createdAt])
+  @@index([toolId])
+  @@index([status])
+}
+
+enum JobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+// File System
+model File {
+  id          String          @id @default(cuid())
+  name        String
+  mimeType    String
+  size        Int
+  url         String
+  storageKey  String
+  provider    StorageProvider @default(S3)
+  isPublic    Boolean         @default(false)
+  userId      String
+  user        User            @relation(fields: [userId], references: [id])
+  workspaceId String?
+  workspace   Workspace?      @relation(fields: [workspaceId], references: [id])
+  folderId    String?
+  folder      Folder?         @relation(fields: [folderId], references: [id])
+  versions    FileVersion[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([userId])
+  @@index([workspaceId])
+}
+
+enum StorageProvider {
+  S3
+  CLOUDINARY
+  LOCAL
+}
+
+model Folder {
+  id        String   @id @default(cuid())
+  name      String
+  parentId  String?
+  parent    Folder?  @relation("FolderTree", fields: [parentId], references: [id])
+  children  Folder[] @relation("FolderTree")
+  files     File[]
+  createdAt DateTime @default(now())
+}
+
+model FileVersion {
+  id        String   @id @default(cuid())
+  version   Int
+  url       String
+  size      Int
+  fileId    String
+  file      File     @relation(fields: [fileId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+// Subscription & Billing
+model Subscription {
+  id                   String    @id @default(cuid())
+  stripeSubscriptionId String?   @unique
+  stripeCustomerId     String?
+  plan                 Plan
+  status               SubStatus @default(ACTIVE)
+  currentPeriodStart   DateTime
+  currentPeriodEnd     DateTime
+  cancelAtPeriodEnd    Boolean   @default(false)
+  userId               String
+  user                 User      @relation(fields: [userId], references: [id])
+  payments             Payment[]
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([stripeSubscriptionId])
+}
+
+enum SubStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  TRIALING
+  PAUSED
+}
+
+model Payment {
+  id              String       @id @default(cuid())
+  amount          Int
+  currency        String       @default("usd")
+  status          PayStatus
+  stripePaymentId String?      @unique
+  subscriptionId  String
+  subscription    Subscription @relation(fields: [subscriptionId], references: [id])
+  createdAt       DateTime     @default(now())
+}
+
+enum PayStatus {
+  SUCCEEDED
+  PENDING
+  FAILED
+  REFUNDED
+}
+
+// Notifications
+model Notification {
+  id        String    @id @default(cuid())
+  type      NotifType
+  title     String
+  message   String
+  isRead    Boolean   @default(false)
+  data      Json?
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  createdAt DateTime  @default(now())
+
+  @@index([userId, isRead])
+}
+
+enum NotifType {
+  SYSTEM
+  TOOL_COMPLETE
+  PAYMENT
+  TEAM
+  PROMOTION
+}
+
+// API Keys
+model ApiKey {
+  id        String    @id @default(cuid())
+  name      String
+  key       String    @unique
+  lastUsed  DateTime?
+  isActive  Boolean   @default(true)
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  createdAt DateTime  @default(now())
+
+  @@index([key])
+}
+
+// Automation Workflows
+model Automation {
+  id          String    @id @default(cuid())
+  name        String
+  description String?
+  trigger     Json
+  actions     Json
+  isActive    Boolean   @default(true)
+  lastRun     DateTime?
+  runCount    Int       @default(0)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+// Analytics Events
+model AnalyticsEvent {
+  id         String   @id @default(cuid())
+  event      String
+  properties Json?
+  userId     String?
+  sessionId  String?
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([event])
+  @@index([userId])
+  @@index([createdAt])
+}
